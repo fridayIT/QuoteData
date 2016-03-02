@@ -31,8 +31,11 @@ Quo_collection = dbname['quote__tick']
 ###########################################
 
 def thr_insert_quote(*args,**kwargs):
-	db, data = args
-	db.insert_many(data)
+	try:
+		db, data = args
+		db.insert_many(data)
+	except Exception as e:
+		print e
 
 date = datetime.now().strftime('%Y-%m-%d ')
 def thr_getdate():

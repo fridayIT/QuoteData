@@ -24,9 +24,9 @@ def get_title(title, arg, open_file):
 
 	for i in first_line:
 		i = i.strip(' ')
-		i = i.strip(r'\t')
+		#i = i.strip(r'\t')
 		if i != '':
-			title.append(i)
+			title.append(i.lower())
 
 
 def thr_insert_quote(*args,**kwargs):
@@ -93,18 +93,19 @@ def extract_qoute(title, open_file, Quo_collection):
 if __name__ == '__main__':
 	dbname = MongoClient(MONGO_HOST, MONGO_PORT)['yunsoft_qoute']
 	col_list = []
-	col_list.append(dbname['qoute_second'])
 	col_list.append(dbname['qoute_minute'])
+	col_list.append(dbname['qoute_minute5'])
 	col_list.append(dbname['qoute_hour'])
 	col_list.append(dbname['qoute_day'])
 
-	sys.argv = sys.argv[1:]
 	i = 0
+	sys.argv = sys.argv[1:]
 	for arg in sys.argv:
 		title = []
 		pf = file(arg, r'r')	
 		get_title(title, arg, pf)
 
+		print title
 		extract_qoute(title, pf, col_list[i])
 		i += 1
 		pf.close()

@@ -19,7 +19,7 @@ except Exception:
 
 
 client = MongoClient(MONGO_IP, MONGO_PORT) 
-client.auth()
+#client.auth()
 dbname = client['yunsoft_qoute']
 dbname.authenticate(USERNAME, PASSWD)
 quo_collection = dbname['qoute_tick']
@@ -36,7 +36,6 @@ def thr_insert_quote(*args,**kwargs):
 		print e
 
 
-date = datetime.now().strftime('%Y-%m-%d ')
 def thr_getdate():
 	'''
 	在晚上11点时睡眠1小时以上后对QOUTE_YESTERDAY对象进行更新 
@@ -168,7 +167,27 @@ class Esqoutecli(object):
 			return data
 		except Exception as e:
 			print e
-	
+
+def func_com_date(updatetime):
+	"""
+	对拼接后的行情时间进行处理，科学的情况下在跨天时间段会出现拼接后的时间超前或慢一天。
+	"""
+	hour_min_sec = updatetime[:2]+':'+updatetime[2:4]+':'+updatetime[4:6]
+	real_time = datetime.now()
+	new_time =  real_time.strftime('%Y-%m-%d ') + hour_min_sec
+	new_time = datetime.strptime(new_time,'%Y-%m-%d %H:%M:%S')
+
+	qou_mktime = time.mktime(new_time.timetuple())
+	ser_real_mktime = time.mktime(real_time.timetuple())
+	if (qou_mktime - ser_real_mktime) > 1000:
+		print 'ss'
+		new_time = QOUTE_YESTERDAY.strftime('%Y-%m-%d ') + hour_min_sec
+		new_time = datetime.strptime(new_time,'%Y-%m-%d %H:%M:%S')
+	elif (qou_mktime - ser_real_mktime) < -1000:
+		print 'cc'
+		new_time = datetime.now().strftime('%Y-%m-%d ') + hour_min_sec
+		new_time = datetime.strptime(new_time,'%Y-%m-%d %H:%M:%S')
+	return new_time
 
 def un_pack_recv_data(quo_data):
 	'''
@@ -176,14 +195,15 @@ def un_pack_recv_data(quo_data):
 	'''
 	_format = 'ffffffffffff'
 	_format2 = 'fffffifffffffffff'	
-	Market, Code = struct.unpack('=40s66s', quo_data[:106])
+	Market, Code = struct.unpack('40s66s', quo_data[:106])
 	YClose, YSettle, Open, High, Low, New, NetChg, Markup, Swing, Settle, Volume, Amount = struct.unpack(_format, quo_data[106:154])
 	#这些数据暂时不储存数据库
-	APP = struct.unpack('40f', quo_data[154:314])
+	t_amount = struct.unpack('40f', quo_data[154:314])
 
 	#ASK, AskVol, Bid, BidVol = struct.unpack('10f10f10f10f', quo_data[154:314])
 	#print repr(quo_data)
 	AvgPrice, LimitUp, LimitDown, HH, HL, YOPI, ZXSD, JXSD, CJJE, TCloes, Lastvol, status, updatetime, BestBPrice, BestBVol, BestSPrice, BestSVol = struct.unpack(_format2, quo_data[314:])
+
 	insert_sql = {}
 	market = Market.strip('\0')
 	code = Code.strip('\0')
@@ -213,6 +233,10 @@ def un_pack_recv_data(quo_data):
 	insert_sql['tclose'] = TCloes
 	insert_sql['lastvol'] = Lastvol
 	insert_sql['status'] = status
+	insert_sql['bestbprice'] = BestBPrice
+	insert_sql['bestbvol'] = BestBVol
+	insert_sql['bestsprice'] = BestSPrice
+	insert_sql['bestsvol'] = BestSVol
 
 	updatetime = int(updatetime)
 	if updatetime < 0 or New < 0:
@@ -223,22 +247,22 @@ def un_pack_recv_data(quo_data):
 			updatetime = '0'+ updatetime
 		else:
 			break
-	hour_min_sec = updatetime[:2]+':'+updatetime[2:4]+':'+updatetime[4:6]
-	updatetime =  datetime.now().strftime('%Y-%m-%d ') + hour_min_sec
-	updatetime = datetime.strptime(updatetime,'%Y-%m-%d %H:%M:%S')
-	if updatetime.hour - datetime.now().hour > 1:
-		updatetime = QOUTE_YESTERDAY + hour_min_sec
-		updatetime = datetime.strptime(updatetime,'%Y-%m-%d %H:%M:%S')
-	#print updatetime, Market, Code
+	real_time = func_com_date(updatetime)
 
-	insert_sql['updatetime'] = updatetime
-	insert_sql['bestbprice'] = BestBPrice
-	insert_sql['bestbvol'] = BestBVo
-	insert_sql['bestsprice'] = BestSPrice
-	insert_sql['bestsvol'] = BestSVol
-	
+	insert_sql['updatetime'] = real_time
+	print insert_sql
+	print ''
+	print ''
+	print ''
 	return insert_sql
 
+
+
+def get_cmd_len(re_data):
+	try:
+		return struct.unpack('ii', re_data)
+	except Exception as e:
+		print e
 
 
 #Recv Quote
@@ -251,60 +275,62 @@ def recv_quote(*args, **kwargs):
 	index = 0
 	cmd , get_len = 0, 0
 	i = 0
+
 	while 1:
 		re_data = cli.recv(8)
-		try:
-			cmd, get_len = struct.unpack('ii', re_data)
-		except Exception as e:
-			print e
+		cmd, get_len = get_cmd_len(re_data)
 		
 		if cmd == HCODE_RES_REAL_TIME_QOUTE:
 			try :
 				quo_data = cli.recv(get_len)
 				insert_sql = un_pack_recv_data(quo_data) 
-				if (insert_sql == None):
+				if insert_sql is None:
 					continue
+
+				insert_mary[index].append(insert_sql)
 			except Exception as e:
 				print e
 			
-			insert_mary[index].append(insert_sql)
-
 			i+=1
 			if i == 5:
 				thr = Thread(target=thr_insert_quote,args=(quo_collection, insert_mary[index]))
 				thr.daemon = True
 				thr.start()
-				new_list = []
 
+				new_list = []
 				insert_mary[index % 9] = new_list
 				index += 1
+				index %= 9
 				i = 0
-			if index == 9:
-				index = 0
+			
 		elif cmd == HCODE_RES_QUOTE:
 			data = cli.recv(get_len)
+
 		elif cmd == RCODE_RECONNECTION:
 			cli.relogin(address)
 			cli.take_quote("HKIF", "NYMEX CL 1605")
 			cli.take_quote("HKIF", "HKIF HSI 1603")
 			cli.take_quote("HKIF", "HKIF HSI 1604")
 			time.sleep(3)
+
 		else :
 			data = cli.recv(get_len)
 			
 #Onrecv_quote
 if __name__ == '__main__':
-	create_daemon()
+	#create_daemon()
 	key_id = '61oETzKXQAGaYdJFuYh7EQnp2XdTP1oV'
 	escli = Esqoutecli(key_id)
 	escli.connect_(address)
 	escli.auth_key(key_id)
+
 	if escli.login('csqoute', 'Vz3023~F') != '':
 		print 'login succuess.'
 	
 	recv_thr = Thread(target=recv_quote, args=(escli,))
 	recv_thr.daemon = True
 	recv_thr.start()
+
 	#	如果服务器存在定时服务,重复订阅是为了保持连接持久性
 	while 1:
 		escli.take_quote("HKIF", "NYMEX CL 1605")

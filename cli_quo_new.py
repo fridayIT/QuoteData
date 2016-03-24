@@ -16,13 +16,14 @@ except Exception:
 	QOUTE_YESTERDAY = datetime.now().strftime('%Y-%m-%d ')
 
 
-
-
 client = MongoClient(MONGO_IP, MONGO_PORT) 
 #client.auth()
 dbname = client['yunsoft_qoute']
 dbname.authenticate(USERNAME, PASSWD)
 quo_collection = dbname['qoute_tick']
+
+#备胎服务器
+address = [('120.25.93.6', 9998),('120.25.93.6', 9999),('120.25.93.6', 8255), ('120.25.93.6', 9996)]
 
 
 def thr_insert_quote(*args,**kwargs):
@@ -46,10 +47,6 @@ def thr_getdate():
 		if (datetime.now().strftime('%H') == '23'):
 			time.sleep(60 * 60 + 3)
 			QOUTE_YESTERDAY = datetime.now().strftime('%Y-%m-%d ')
-
-time_thr = Thread(target=thr_getdate)
-time_thr.daemon = True
-time_thr.start()
 
 
 def create_daemon():
@@ -76,8 +73,6 @@ def create_daemon():
 		os.dup2(so.fileno(), sys.stdout.fileno())
 		os.dup2(se.fileno(), sys.stderr.fileno())
 
-#备胎服务器
-address = [('120.25.93.6', 9998),('120.25.93.6', 9999),('120.25.93.6', 8255), ('120.25.93.6', 9996)]
 
 class Esqoutecli(object):
 	def __init__(self,  key):
@@ -106,9 +101,6 @@ class Esqoutecli(object):
 			print e
 
 	def relogin(self):
-		'''
-		    重新登录
-		'''
 		self.re_connect()
 		self.auth_key()
 		self.login()
@@ -191,7 +183,7 @@ def func_com_date(updatetime):
 
 def un_pack_recv_data(quo_data):
 	'''
-		对接收到的行情进行数据解包，解包后拼接日期，与系统时间比较，正常情况下相差不超1小时(可调整)
+		对接收到的行情进行数据解包，解包后拼接日期，与系统时间比较
 	'''
 	_format = 'ffffffffffff'
 	_format2 = 'fffffifffffffffff'	
@@ -200,7 +192,7 @@ def un_pack_recv_data(quo_data):
 	#这些数据暂时不储存数据库
 	t_amount = struct.unpack('40f', quo_data[154:314])
 
-	#ASK, AskVol, Bid, BidVol = struct.unpack('10f10f10f10f', quo_data[154:314])
+	#ASK, AskVol, Bid, BidVol = t_amount[0], t_amount[1], t_amount[2], t_amount[3]
 	#print repr(quo_data)
 	AvgPrice, LimitUp, LimitDown, HH, HL, YOPI, ZXSD, JXSD, CJJE, TCloes, Lastvol, status, updatetime, BestBPrice, BestBVol, BestSPrice, BestSVol = struct.unpack(_format2, quo_data[314:])
 
@@ -250,10 +242,6 @@ def un_pack_recv_data(quo_data):
 	real_time = func_com_date(updatetime)
 
 	insert_sql['updatetime'] = real_time
-	print insert_sql
-	print ''
-	print ''
-	print ''
 	return insert_sql
 
 
@@ -330,6 +318,10 @@ if __name__ == '__main__':
 	recv_thr = Thread(target=recv_quote, args=(escli,))
 	recv_thr.daemon = True
 	recv_thr.start()
+
+	time_thr = Thread(target=thr_getdate)
+	time_thr.daemon = True
+	time_thr.start()
 
 	#	如果服务器存在定时服务,重复订阅是为了保持连接持久性
 	while 1:
